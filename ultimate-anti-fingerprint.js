@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      1.0
+// @version      1.1
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -24,6 +24,8 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
 
 NOTE: Paranoid mode is enabled (PARANOID_CANVAS = true) for maximum protection against canvas fingerprinting.
 This returns blank canvas data to prevent unique fingerprinting.
+
+ENHANCED: Multiple blank images, consistent patterns, and improved font detection for better protection.
 */
 
 (function() {
@@ -131,30 +133,78 @@ This returns blank canvas data to prevent unique fingerprinting.
     // --- 5. Canvas randomization (subtle, not static, or paranoid mode) ---
     if (window.HTMLCanvasElement) {
         if (PARANOID_CANVAS) {
-            // Always return a blank image (paranoid mode)
-            const blank = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP89PwGHwAFYAJm6ocdgAAAABJRU5ErkJggg==';
-            HTMLCanvasElement.prototype.toDataURL = function() { return blank; };
-            HTMLCanvasElement.prototype.toBlob = function(cb) {
-                // Create a blank blob
+            // Enhanced paranoid canvas mode - multiple blank images for variety
+            const blankImages = [
+                'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP89PwGHwAFYAJm6ocdgAAAABJRU5ErkJggg==', // 1x1 transparent
+                'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77yQAAAABJRU5ErkJggg==', // 1x1 white
+                'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77yQAAAABJRU5ErkJggg==' // 1x1 black
+            ];
+            
+            // Select consistent blank image based on canvas size
+            const getBlankImage = (canvas) => {
+                const seed = canvas.width + canvas.height;
+                const index = Math.abs(seed) % blankImages.length;
+                return blankImages[index];
+            };
+            
+            // Override toDataURL with enhanced protection
+            HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+                const blank = getBlankImage(this);
+                return blank;
+            };
+            
+            // Override toBlob with enhanced protection
+            HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
+                const blank = getBlankImage(this);
                 const byteString = atob(blank.split(',')[1]);
                 const ab = new ArrayBuffer(byteString.length);
                 const ia = new Uint8Array(ab);
                 for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-                cb(new Blob([ab], {type: 'image/png'}));
+                const blob = new Blob([ab], {type: type || 'image/png'});
+                if (callback) callback(blob);
+                return blob;
             };
             
-            // Also override getImageData to return blank data
+            // Enhanced getImageData override with consistent patterns
             const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
             CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
                 const imgData = origGetImageData.call(this, x, y, w, h);
-                // Fill with consistent blank data
+                const seed = x + y + w + h + this.canvas.width + this.canvas.height;
+                
+                // Create consistent pattern based on canvas and coordinates
                 for (let i = 0; i < imgData.data.length; i += 4) {
-                    imgData.data[i] = 255;     // R
-                    imgData.data[i+1] = 255;   // G
-                    imgData.data[i+2] = 255;   // B
-                    imgData.data[i+3] = 255;   // A
+                    const pattern = Math.sin(seed + i) * Math.cos(seed + i);
+                    const color = Math.abs(pattern) * 255;
+                    
+                    imgData.data[i] = color;     // R
+                    imgData.data[i+1] = color;   // G
+                    imgData.data[i+2] = color;   // B
+                    imgData.data[i+3] = 255;     // A (fully opaque)
                 }
                 return imgData;
+            };
+            
+            // Override getContext to ensure consistent behavior
+            const origGetContext = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(contextType, contextAttributes) {
+                const context = origGetContext.call(this, contextType, contextAttributes);
+                
+                if (contextType === '2d') {
+                    // Override fillText to prevent text-based fingerprinting
+                    const origFillText = context.fillText;
+                    context.fillText = function(text, x, y, maxWidth) {
+                        // Don't actually draw text, just return
+                        return;
+                    };
+                    
+                    // Override strokeText similarly
+                    const origStrokeText = context.strokeText;
+                    context.strokeText = function(text, x, y, maxWidth) {
+                        return;
+                    };
+                }
+                
+                return context;
             };
         } else {
             // More aggressive canvas fingerprinting protection
@@ -225,7 +275,7 @@ This returns blank canvas data to prevent unique fingerprinting.
         };
     }
 
-    // --- 6. WebGL spoofing (aggressive protection) ---
+    // --- 6. WebGL spoofing (enhanced protection) ---
     if (window.WebGLRenderingContext) {
         const origGetParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(param) {
@@ -233,13 +283,14 @@ This returns blank canvas data to prevent unique fingerprinting.
             if (param === 37445) return profile.webglVendor;
             if (param === 37446) return profile.webglRenderer;
             
-            // Return consistent values for common parameters to reduce uniqueness
+            // Enhanced parameter spoofing with more realistic values
             const result = origGetParameter.call(this, param);
             if (typeof result === 'number' && result > 0) {
-                // Use deterministic values based on parameter type
+                // Use more sophisticated deterministic values
                 const seed = param + this.canvas.width + this.canvas.height;
-                const consistentValue = Math.floor(Math.sin(seed) * 1000) + 1000;
-                return consistentValue;
+                const baseValue = Math.floor(Math.sin(seed) * 500) + 1000;
+                const variation = Math.floor(Math.cos(seed) * 100);
+                return Math.max(1, baseValue + variation);
             }
             return result;
         };
@@ -303,12 +354,22 @@ This returns blank canvas data to prevent unique fingerprinting.
         'Trebuchet MS', 'Verdana', 'Symbol', 'Wingdings'
     ];
     
-    // Override document.fonts.check to always return true for Windows fonts
+    // Enhanced font protection
     if (document.fonts && typeof document.fonts.check === 'function') {
         const origCheck = document.fonts.check.bind(document.fonts);
         document.fonts.check = (fontSpec, text) => {
-            // Always return true for Windows fonts, false for others
-            return winFonts.some(font => fontSpec.includes(font));
+            // Enhanced Windows font detection with fallbacks
+            const isWindowsFont = winFonts.some(font => 
+                fontSpec.toLowerCase().includes(font.toLowerCase())
+            );
+            
+            // Also check for common font families
+            const commonFonts = ['arial', 'helvetica', 'times', 'courier', 'verdana', 'georgia'];
+            const isCommonFont = commonFonts.some(font => 
+                fontSpec.toLowerCase().includes(font)
+            );
+            
+            return isWindowsFont || isCommonFont;
         };
     }
     
