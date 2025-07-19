@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      0.9
+// @version      1.0
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -142,6 +142,20 @@ This returns blank canvas data to prevent unique fingerprinting.
                 for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
                 cb(new Blob([ab], {type: 'image/png'}));
             };
+            
+            // Also override getImageData to return blank data
+            const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+            CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
+                const imgData = origGetImageData.call(this, x, y, w, h);
+                // Fill with consistent blank data
+                for (let i = 0; i < imgData.data.length; i += 4) {
+                    imgData.data[i] = 255;     // R
+                    imgData.data[i+1] = 255;   // G
+                    imgData.data[i+2] = 255;   // B
+                    imgData.data[i+3] = 255;   // A
+                }
+                return imgData;
+            };
         } else {
             // More aggressive canvas fingerprinting protection
             const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
@@ -196,6 +210,8 @@ This returns blank canvas data to prevent unique fingerprinting.
                     };
                 });
             }
+            
+
         }
     }
     
