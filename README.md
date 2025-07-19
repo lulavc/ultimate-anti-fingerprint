@@ -6,6 +6,10 @@ A comprehensive anti-fingerprinting solution designed to protect user privacy an
 
 For a complete browser-based solution, check out our Chrome extension: **[Incognito Fingerprint](https://github.com/lulavc/incognito-fingerprint)**
 
+## GreasyFork Userscript
+
+For easy installation as a browser userscript, install from: **[Ultimate Anti-Fingerprint on GreasyFork](https://greasyfork.org/en/scripts/543036-ultimate-anti-fingerprint)**
+
 This JavaScript library provides the core anti-fingerprinting functionality that can be integrated into any web application.
 
 ## Features
@@ -26,6 +30,10 @@ This JavaScript library provides the core anti-fingerprinting functionality that
 ### Chrome Extension
 
 For the easiest setup, install our Chrome extension: **[Incognito Fingerprint](https://github.com/lulavc/incognito-fingerprint)**
+
+### GreasyFork Userscript
+
+For automatic installation and updates, install from: **[Ultimate Anti-Fingerprint on GreasyFork](https://greasyfork.org/en/scripts/543036-ultimate-anti-fingerprint)**
 
 ### Direct Script Inclusion
 
