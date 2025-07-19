@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      0.7
+// @version      0.8
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -140,7 +140,7 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
                 cb(new Blob([ab], {type: 'image/png'}));
             };
         } else {
-            // More consistent canvas fingerprinting protection
+            // More aggressive canvas fingerprinting protection
             const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
             HTMLCanvasElement.prototype.toDataURL = function() {
                 const ctx = this.getContext('2d');
@@ -148,13 +148,13 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
                     const { width, height } = this;
                     try {
                         const imgData = ctx.getImageData(0, 0, width, height);
-                        // Use deterministic noise based on canvas size for consistency
-                        const seed = width * height;
+                        // Use more aggressive deterministic noise
+                        const seed = width * height + Date.now() % 1000;
                         for (let i = 0; i < imgData.data.length; i += 4) {
-                            const noise = Math.sin(seed + i) * 0.5;
-                            imgData.data[i] = Math.max(0, Math.min(255, imgData.data[i] + noise));
-                            imgData.data[i+1] = Math.max(0, Math.min(255, imgData.data[i+1] + noise));
-                            imgData.data[i+2] = Math.max(0, Math.min(255, imgData.data[i+2] + noise));
+                            const noise = Math.sin(seed + i) * Math.cos(seed + i) * 2;
+                            imgData.data[i] = Math.max(0, Math.min(255, imgData.data[i] + Math.floor(noise)));
+                            imgData.data[i+1] = Math.max(0, Math.min(255, imgData.data[i+1] + Math.floor(noise)));
+                            imgData.data[i+2] = Math.max(0, Math.min(255, imgData.data[i+2] + Math.floor(noise)));
                         }
                         ctx.putImageData(imgData, 0, 0);
                     } catch (e) {}
@@ -217,21 +217,22 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
             // Add more aggressive randomization to reduce uniqueness
             const result = origGetParameter.call(this, param);
             if (typeof result === 'number' && result > 0) {
-                // Use more significant deterministic noise
-                const seed = param + this.canvas.width + this.canvas.height;
-                const noise = Math.sin(seed) * Math.cos(seed) * 2;
+                // Use more significant deterministic noise with time component
+                const seed = param + this.canvas.width + this.canvas.height + Date.now() % 1000;
+                const noise = Math.sin(seed) * Math.cos(seed) * 3;
                 return Math.max(0, result + Math.floor(noise));
             }
             return result;
         };
         
-        // More consistent shader precision
+        // More aggressive shader precision randomization
         const origGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;
         WebGLRenderingContext.prototype.getShaderPrecisionFormat = function() {
             const res = origGetShaderPrecisionFormat.apply(this, arguments);
             if (res && typeof res.precision === 'number') {
-                // Use deterministic noise for consistency
-                const noise = Math.sin(this.canvas.width + this.canvas.height) * 0.5;
+                // Use more aggressive deterministic noise with time component
+                const seed = this.canvas.width + this.canvas.height + Date.now() % 1000;
+                const noise = Math.sin(seed) * Math.cos(seed) * 2;
                 res.precision = Math.max(0, res.precision + Math.floor(noise));
             }
             return res;
