@@ -2,6 +2,12 @@
 
 A comprehensive anti-fingerprinting solution designed to protect user privacy and prevent browser fingerprinting attacks.
 
+## Chrome Extension
+
+For a complete browser-based solution, check out our Chrome extension: **[Incognito Fingerprint](https://github.com/lulavc/incognito-fingerprint)**
+
+This JavaScript library provides the core anti-fingerprinting functionality that can be integrated into any web application.
+
 ## Features
 
 - **Canvas Fingerprinting Protection**: Prevents canvas-based fingerprinting
@@ -17,12 +23,17 @@ A comprehensive anti-fingerprinting solution designed to protect user privacy an
 
 ## Installation
 
-### Browser Extension
+### Chrome Extension
 
-1. Clone this repository
-2. Open your browser's extension management page
-3. Enable "Developer mode"
-4. Click "Load unpacked" and select the `extension` folder
+For the easiest setup, install our Chrome extension: **[Incognito Fingerprint](https://github.com/lulavc/incognito-fingerprint)**
+
+### Direct Script Inclusion
+
+1. Download `ultimate-anti-fingerprint.js`
+2. Include it in your HTML:
+```html
+<script src="ultimate-anti-fingerprint.js"></script>
+```
 
 ### NPM Package
 
