@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      0.8
+// @version      0.9
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -21,13 +21,16 @@ This ensures HTTP headers match the JavaScript spoofing for maximum effectivenes
 
 CRITICAL: The User-Agent header is the biggest fingerprinting vector. Without a User-Agent switcher,
 your HTTP headers will still reveal your real OS/browser, making you unique despite JavaScript protection.
+
+NOTE: Paranoid mode is enabled (PARANOID_CANVAS = true) for maximum protection against canvas fingerprinting.
+This returns blank canvas data to prevent unique fingerprinting.
 */
 
 (function() {
     'use strict';
 
     // --- Feature toggles ---
-    const PARANOID_CANVAS = false; // true = always blank canvas (paranoid mode)
+    const PARANOID_CANVAS = true;  // true = always blank canvas (paranoid mode)
     const ROUND_SCREEN = false;    // true = round screen size to nearest 100
     const FONT_RANDOMIZE = true;   // true = randomize measureText width
     const CANVAS_TEXT_RANDOMIZE = true; // true = randomize fillText/strokeText/rects
@@ -206,7 +209,7 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
         };
     }
 
-    // --- 6. WebGL spoofing (realistic, subtle) ---
+    // --- 6. WebGL spoofing (aggressive protection) ---
     if (window.WebGLRenderingContext) {
         const origGetParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(param) {
@@ -214,26 +217,25 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
             if (param === 37445) return profile.webglVendor;
             if (param === 37446) return profile.webglRenderer;
             
-            // Add more aggressive randomization to reduce uniqueness
+            // Return consistent values for common parameters to reduce uniqueness
             const result = origGetParameter.call(this, param);
             if (typeof result === 'number' && result > 0) {
-                // Use more significant deterministic noise with time component
-                const seed = param + this.canvas.width + this.canvas.height + Date.now() % 1000;
-                const noise = Math.sin(seed) * Math.cos(seed) * 3;
-                return Math.max(0, result + Math.floor(noise));
+                // Use deterministic values based on parameter type
+                const seed = param + this.canvas.width + this.canvas.height;
+                const consistentValue = Math.floor(Math.sin(seed) * 1000) + 1000;
+                return consistentValue;
             }
             return result;
         };
         
-        // More aggressive shader precision randomization
+        // Consistent shader precision values
         const origGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;
         WebGLRenderingContext.prototype.getShaderPrecisionFormat = function() {
             const res = origGetShaderPrecisionFormat.apply(this, arguments);
             if (res && typeof res.precision === 'number') {
-                // Use more aggressive deterministic noise with time component
-                const seed = this.canvas.width + this.canvas.height + Date.now() % 1000;
-                const noise = Math.sin(seed) * Math.cos(seed) * 2;
-                res.precision = Math.max(0, res.precision + Math.floor(noise));
+                // Return consistent precision values
+                const seed = this.canvas.width + this.canvas.height;
+                res.precision = Math.floor(Math.sin(seed) * 10) + 20; // Consistent range
             }
             return res;
         };
@@ -259,13 +261,10 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
         const origGetSupportedExtensions = WebGLRenderingContext.prototype.getSupportedExtensions;
         WebGLRenderingContext.prototype.getSupportedExtensions = function() {
             const extensions = origGetSupportedExtensions.call(this);
-            // Add deterministic randomization to extension list
+            // Return consistent subset of extensions
             const seed = this.canvas.width + this.canvas.height;
-            if (Math.sin(seed) > 0.5) {
-                return extensions.filter((_, index) => index % 2 === 0);
-            } else {
-                return extensions.filter((_, index) => index % 2 === 1);
-            }
+            const startIndex = Math.floor(Math.sin(seed) * extensions.length);
+            return extensions.slice(startIndex, startIndex + Math.floor(extensions.length / 2));
         };
     }
 
