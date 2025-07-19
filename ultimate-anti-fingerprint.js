@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      0.6
+// @version      0.7
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -214,12 +214,13 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
             if (param === 37445) return profile.webglVendor;
             if (param === 37446) return profile.webglRenderer;
             
-            // Add subtle randomization to other parameters to reduce uniqueness
+            // Add more aggressive randomization to reduce uniqueness
             const result = origGetParameter.call(this, param);
             if (typeof result === 'number' && result > 0) {
-                // Add small deterministic noise based on parameter type
-                const noise = Math.sin(param + this.canvas.width + this.canvas.height) * 0.1;
-                return result + noise;
+                // Use more significant deterministic noise
+                const seed = param + this.canvas.width + this.canvas.height;
+                const noise = Math.sin(seed) * Math.cos(seed) * 2;
+                return Math.max(0, result + Math.floor(noise));
             }
             return result;
         };
@@ -241,15 +242,29 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
         WebGLRenderingContext.prototype.getExtension = function(name) {
             const ext = origGetExtension.call(this, name);
             if (ext && typeof ext === 'object') {
-                // Add subtle randomization to extension properties
+                // Add more aggressive randomization to extension properties
                 Object.keys(ext).forEach(key => {
                     if (typeof ext[key] === 'number') {
-                        const noise = Math.sin(name.length + key.length) * 0.1;
-                        ext[key] = ext[key] + noise;
+                        const seed = name.length + key.length + this.canvas.width;
+                        const noise = Math.sin(seed) * Math.cos(seed) * 3;
+                        ext[key] = Math.max(0, ext[key] + Math.floor(noise));
                     }
                 });
             }
             return ext;
+        };
+        
+        // Override getSupportedExtensions to return consistent list
+        const origGetSupportedExtensions = WebGLRenderingContext.prototype.getSupportedExtensions;
+        WebGLRenderingContext.prototype.getSupportedExtensions = function() {
+            const extensions = origGetSupportedExtensions.call(this);
+            // Add deterministic randomization to extension list
+            const seed = this.canvas.width + this.canvas.height;
+            if (Math.sin(seed) > 0.5) {
+                return extensions.filter((_, index) => index % 2 === 0);
+            } else {
+                return extensions.filter((_, index) => index % 2 === 1);
+            }
         };
     }
 
@@ -280,6 +295,31 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
             return winFonts.some(font => fontSpec.includes(font));
         };
     }
+    
+    // Override font enumeration via CSS selectors
+    const originalQuerySelector = document.querySelector;
+    document.querySelector = function(selector) {
+        if (selector && selector.includes('font')) {
+            // Return a fake element for font queries
+            return {
+                style: { fontFamily: 'Arial, sans-serif' },
+                getBoundingClientRect: () => ({ width: 100, height: 20 })
+            };
+        }
+        return originalQuerySelector.call(this, selector);
+    };
+    
+    const originalQuerySelectorAll = document.querySelectorAll;
+    document.querySelectorAll = function(selector) {
+        if (selector && selector.includes('font')) {
+            // Return fake elements for font queries
+            return [{
+                style: { fontFamily: 'Arial, sans-serif' },
+                getBoundingClientRect: () => ({ width: 100, height: 20 })
+            }];
+        }
+        return originalQuerySelectorAll.call(this, selector);
+    };
     
     // Override font enumeration methods
     if (window.CanvasRenderingContext2D) {
@@ -314,18 +354,7 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
         });
     }
     
-    // Override font enumeration via CSS
-    const originalQuerySelector = document.querySelector;
-    document.querySelector = function(selector) {
-        if (selector && selector.includes('font')) {
-            // Return a fake element for font queries
-            return {
-                style: { fontFamily: 'Arial, sans-serif' },
-                getBoundingClientRect: () => ({ width: 100, height: 20 })
-            };
-        }
-        return originalQuerySelector.call(this, selector);
-    };
+
 
     // --- 9. Permissions, mediaDevices, storage, etc. (realistic) ---
     if ('permissions' in navigator) {
