@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      1.1
+// @version      1.2
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -25,7 +25,7 @@ your HTTP headers will still reveal your real OS/browser, making you unique desp
 NOTE: Paranoid mode is enabled (PARANOID_CANVAS = true) for maximum protection against canvas fingerprinting.
 This returns blank canvas data to prevent unique fingerprinting.
 
-ENHANCED: Multiple blank images, consistent patterns, and improved font detection for better protection.
+ENHANCED: Multiple blank images, consistent patterns, improved font detection, enhanced AudioContext, screen, battery, connection, and timezone protection for maximum fingerprinting resistance.
 */
 
 (function() {
@@ -335,14 +335,70 @@ ENHANCED: Multiple blank images, consistent patterns, and improved font detectio
         };
     }
 
-    // --- 7. AudioContext spoofing (safe) ---
+    // --- 7. Enhanced AudioContext spoofing ---
     try {
         if (window.AudioContext) {
-            const origSampleRate = Object.getOwnPropertyDescriptor(AudioContext.prototype, 'sampleRate');
+            // Override sampleRate to return consistent value
             Object.defineProperty(AudioContext.prototype, 'sampleRate', {
                 get: function() { return 48000; },
                 configurable: true
             });
+            
+            // Override state to always return 'running'
+            Object.defineProperty(AudioContext.prototype, 'state', {
+                get: function() { return 'running'; },
+                configurable: true
+            });
+            
+            // Override createAnalyser to return consistent values
+            const origCreateAnalyser = AudioContext.prototype.createAnalyser;
+            AudioContext.prototype.createAnalyser = function() {
+                const analyser = origCreateAnalyser.call(this);
+                
+                // Override analyser properties to match common values
+                Object.defineProperty(analyser, 'fftSize', {
+                    get: function() { return 2048; },
+                    set: function() { return; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'frequencyBinCount', {
+                    get: function() { return 1024; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'channelCount', {
+                    get: function() { return 2; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'channelCountMode', {
+                    get: function() { return 'max'; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'channelInterpretation', {
+                    get: function() { return 'speakers'; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'maxDecibels', {
+                    get: function() { return -30; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'minDecibels', {
+                    get: function() { return -100; },
+                    configurable: true
+                });
+                
+                Object.defineProperty(analyser, 'smoothingTimeConstant', {
+                    get: function() { return 0.8; },
+                    configurable: true
+                });
+                
+                return analyser;
+            };
         }
     } catch (e) {}
 
@@ -433,32 +489,133 @@ ENHANCED: Multiple blank images, consistent patterns, and improved font detectio
     
 
 
-    // --- 9. Permissions, mediaDevices, storage, etc. (realistic) ---
+    // --- 9. Enhanced Screen, Device Memory, and Permissions ---
+    // Screen protection - use common resolutions
+    const commonResolutions = [
+        { width: 1920, height: 1080 },
+        { width: 1366, height: 768 },
+        { width: 1536, height: 864 },
+        { width: 1440, height: 900 },
+        { width: 1280, height: 720 }
+    ];
+    
+    const screenSeed = Math.floor(Math.random() * commonResolutions.length);
+    const selectedResolution = commonResolutions[screenSeed];
+    
+    // Override screen properties
+    Object.defineProperty(screen, 'width', { get: () => selectedResolution.width });
+    Object.defineProperty(screen, 'height', { get: () => selectedResolution.height });
+    Object.defineProperty(screen, 'availWidth', { get: () => selectedResolution.width });
+    Object.defineProperty(screen, 'availHeight', { get: () => selectedResolution.height });
+    Object.defineProperty(screen, 'availLeft', { get: () => 0 });
+    Object.defineProperty(screen, 'availTop', { get: () => 0 });
+    Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+    Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+    
+    // Device memory protection
+    if ('deviceMemory' in navigator) {
+        Object.defineProperty(navigator, 'deviceMemory', { 
+            get: () => 8,
+            configurable: true 
+        });
+    }
+    
+    // Hardware concurrency protection
+    if ('hardwareConcurrency' in navigator) {
+        Object.defineProperty(navigator, 'hardwareConcurrency', { 
+            get: () => 8,
+            configurable: true 
+        });
+    }
+    
+    // Enhanced permissions protection
     if ('permissions' in navigator) {
         const origQuery = navigator.permissions.query;
-        navigator.permissions.query = function () {
+        navigator.permissions.query = function (permissionDesc) {
+            // Return granted for all permissions to prevent fingerprinting
             return Promise.resolve({ state: 'granted' });
         };
     }
     
-    spoof(navigator, 'mediaDevices', () => ({ enumerateDevices: () => Promise.resolve([]) }));
+    // Enhanced mediaDevices protection
+    spoof(navigator, 'mediaDevices', () => ({ 
+        enumerateDevices: () => Promise.resolve([]),
+        getUserMedia: () => Promise.reject(new Error('Permission denied')),
+        getDisplayMedia: () => Promise.reject(new Error('Permission denied'))
+    }));
     
+    // Enhanced storage protection
     if (navigator.storage && navigator.storage.estimate) {
-        navigator.storage.estimate = () => Promise.resolve({ usage: 5242880, quota: 1073741824 });
+        navigator.storage.estimate = () => Promise.resolve({ 
+            usage: 5242880, 
+            quota: 1073741824 
+        });
     }
 
-    // --- 10. Miscellaneous: matchMedia, SharedArrayBuffer, etc. ---
+    // --- 10. Enhanced Battery, Connection, and Miscellaneous ---
+    // Battery API protection
+    if ('getBattery' in navigator) {
+        const origGetBattery = navigator.getBattery;
+        navigator.getBattery = function() {
+            return Promise.resolve({
+                charging: true,
+                chargingTime: 0,
+                dischargingTime: Infinity,
+                level: 1,
+                addEventListener: () => {},
+                removeEventListener: () => {}
+            });
+        };
+    }
+    
+    // Connection API protection
+    if ('connection' in navigator) {
+        Object.defineProperty(navigator, 'connection', {
+            get: () => ({
+                effectiveType: '4g',
+                downlink: 10,
+                rtt: 50,
+                saveData: false,
+                addEventListener: () => {},
+                removeEventListener: () => {}
+            }),
+            configurable: true
+        });
+    }
+    
+    // Enhanced matchMedia protection
     if (window.matchMedia) {
         const origMatchMedia = window.matchMedia;
         window.matchMedia = function(query) {
             if (query.includes('color-scheme')) {
                 return { matches: Math.random() > 0.5, media: query };
             }
+            if (query.includes('prefers-reduced-motion')) {
+                return { matches: false, media: query };
+            }
+            if (query.includes('prefers-color-scheme')) {
+                return { matches: Math.random() > 0.5, media: query };
+            }
             return origMatchMedia.call(this, query);
         };
     }
     
+    // SharedArrayBuffer protection
     spoof(window, 'SharedArrayBuffer', () => undefined);
+    
+    // Enhanced timezone protection
+    Object.defineProperty(Intl, 'DateTimeFormat', {
+        get: function() {
+            return function(locale, options) {
+                if (options && options.timeZone) {
+                    // Always return UTC-05:00 for consistency
+                    return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'America/New_York' });
+                }
+                return new Intl.DateTimeFormat(locale, options);
+            };
+        },
+        configurable: true
+    });
 
     // --- 11. Enhanced Anti-Tracking Features ---
     const blockedTrackers = [
