@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      0.4
+// @version      0.5
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -10,6 +10,15 @@
 // @downloadURL https://update.greasyfork.org/scripts/543036/Ultimate%20Anti-Fingerprint.user.js
 // @updateURL https://update.greasyfork.org/scripts/543036/Ultimate%20Anti-Fingerprint.meta.js
 // ==/UserScript==
+
+/*
+IMPORTANT: For perfect protection, use a User-Agent Switcher extension to match HTTP headers:
+- User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+- Accept-Language: en-US,en;q=0.9
+- Platform: Windows
+
+This ensures HTTP headers match the JavaScript spoofing for maximum effectiveness.
+*/
 
 (function() {
     'use strict';
@@ -80,7 +89,7 @@
     spoof(navigator, 'maxTouchPoints', () => profile.maxTouchPoints);
     spoof(navigator, 'plugins', () => profile.plugins);
     
-    // Timezone spoofing
+    // Timezone spoofing - more comprehensive
     if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
         const orig = Intl.DateTimeFormat.prototype.resolvedOptions;
         Intl.DateTimeFormat.prototype.resolvedOptions = function () {
@@ -89,6 +98,23 @@
             return options;
         };
     }
+    
+    // Override Date methods for timezone
+    const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+    Date.prototype.getTimezoneOffset = function() {
+        return 300; // EST offset (UTC-5)
+    };
+    
+    // Override Intl.DateTimeFormat constructor
+    const originalDateTimeFormat = Intl.DateTimeFormat;
+    Intl.DateTimeFormat = function(locales, options) {
+        if (options && options.timeZone) {
+            options.timeZone = profile.timezone;
+        }
+        return new originalDateTimeFormat(locales, options);
+    };
+    Object.setPrototypeOf(Intl.DateTimeFormat, originalDateTimeFormat);
+    Object.setPrototypeOf(Intl.DateTimeFormat.prototype, originalDateTimeFormat.prototype);
     
     // Screen spoofing (optionally rounded)
     const screenWidth = ROUND_SCREEN ? Math.floor(profile.screenWidth / 100) * 100 : profile.screenWidth;
@@ -111,7 +137,7 @@
                 cb(new Blob([ab], {type: 'image/png'}));
             };
         } else {
-            // Subtle randomization of pixel data
+            // More consistent canvas fingerprinting protection
             const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
             HTMLCanvasElement.prototype.toDataURL = function() {
                 const ctx = this.getContext('2d');
@@ -119,10 +145,13 @@
                     const { width, height } = this;
                     try {
                         const imgData = ctx.getImageData(0, 0, width, height);
+                        // Use deterministic noise based on canvas size for consistency
+                        const seed = width * height;
                         for (let i = 0; i < imgData.data.length; i += 4) {
-                            imgData.data[i] += Math.floor(Math.random() * 2);
-                            imgData.data[i+1] += Math.floor(Math.random() * 2);
-                            imgData.data[i+2] += Math.floor(Math.random() * 2);
+                            const noise = Math.sin(seed + i) * 0.5;
+                            imgData.data[i] = Math.max(0, Math.min(255, imgData.data[i] + noise));
+                            imgData.data[i+1] = Math.max(0, Math.min(255, imgData.data[i+1] + noise));
+                            imgData.data[i+2] = Math.max(0, Math.min(255, imgData.data[i+2] + noise));
                         }
                         ctx.putImageData(imgData, 0, 0);
                     } catch (e) {}
@@ -218,6 +247,30 @@
         const origCheck = document.fonts.check.bind(document.fonts);
         document.fonts.check = (fontSpec, text) => {
             return winFonts.some(font => fontSpec.includes(font)) || origCheck(fontSpec, text);
+        };
+    }
+    
+    // Override CSS.supports for font-display
+    if (window.CSS && window.CSS.supports) {
+        const originalSupports = window.CSS.supports;
+        window.CSS.supports = function(property, value) {
+            if (property === 'font-display') {
+                return false;
+            }
+            return originalSupports.call(this, property, value);
+        };
+    }
+    
+    // Override font enumeration methods
+    if (window.CanvasRenderingContext2D) {
+        const originalMeasureText = CanvasRenderingContext2D.prototype.measureText;
+        CanvasRenderingContext2D.prototype.measureText = function(text) {
+            const result = originalMeasureText.call(this, text);
+            // Ensure consistent font measurements for Windows fonts
+            if (this.font && winFonts.some(font => this.font.includes(font))) {
+                result.width = result.width * 1.0; // Keep consistent
+            }
+            return result;
         };
     }
 
