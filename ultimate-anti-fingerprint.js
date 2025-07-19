@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      0.5
+// @version      0.6
 // @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
 // @author       lulzactive
 // @match        *://*/*
@@ -18,6 +18,9 @@ IMPORTANT: For perfect protection, use a User-Agent Switcher extension to match 
 - Platform: Windows
 
 This ensures HTTP headers match the JavaScript spoofing for maximum effectiveness.
+
+CRITICAL: The User-Agent header is the biggest fingerprinting vector. Without a User-Agent switcher,
+your HTTP headers will still reveal your real OS/browser, making you unique despite JavaScript protection.
 */
 
 (function() {
@@ -210,17 +213,43 @@ This ensures HTTP headers match the JavaScript spoofing for maximum effectivenes
             // 37445: UNMASKED_VENDOR_WEBGL, 37446: UNMASKED_RENDERER_WEBGL
             if (param === 37445) return profile.webglVendor;
             if (param === 37446) return profile.webglRenderer;
-            return origGetParameter.call(this, param);
+            
+            // Add subtle randomization to other parameters to reduce uniqueness
+            const result = origGetParameter.call(this, param);
+            if (typeof result === 'number' && result > 0) {
+                // Add small deterministic noise based on parameter type
+                const noise = Math.sin(param + this.canvas.width + this.canvas.height) * 0.1;
+                return result + noise;
+            }
+            return result;
         };
         
-        // Subtle randomization of shader precision
+        // More consistent shader precision
         const origGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;
         WebGLRenderingContext.prototype.getShaderPrecisionFormat = function() {
             const res = origGetShaderPrecisionFormat.apply(this, arguments);
             if (res && typeof res.precision === 'number') {
-                res.precision += Math.floor(Math.random() * 2);
+                // Use deterministic noise for consistency
+                const noise = Math.sin(this.canvas.width + this.canvas.height) * 0.5;
+                res.precision = Math.max(0, res.precision + Math.floor(noise));
             }
             return res;
+        };
+        
+        // Override getExtension to return consistent extensions
+        const origGetExtension = WebGLRenderingContext.prototype.getExtension;
+        WebGLRenderingContext.prototype.getExtension = function(name) {
+            const ext = origGetExtension.call(this, name);
+            if (ext && typeof ext === 'object') {
+                // Add subtle randomization to extension properties
+                Object.keys(ext).forEach(key => {
+                    if (typeof ext[key] === 'number') {
+                        const noise = Math.sin(name.length + key.length) * 0.1;
+                        ext[key] = ext[key] + noise;
+                    }
+                });
+            }
+            return ext;
         };
     }
 
@@ -243,21 +272,12 @@ This ensures HTTP headers match the JavaScript spoofing for maximum effectivenes
         'Trebuchet MS', 'Verdana', 'Symbol', 'Wingdings'
     ];
     
+    // Override document.fonts.check to always return true for Windows fonts
     if (document.fonts && typeof document.fonts.check === 'function') {
         const origCheck = document.fonts.check.bind(document.fonts);
         document.fonts.check = (fontSpec, text) => {
-            return winFonts.some(font => fontSpec.includes(font)) || origCheck(fontSpec, text);
-        };
-    }
-    
-    // Override CSS.supports for font-display
-    if (window.CSS && window.CSS.supports) {
-        const originalSupports = window.CSS.supports;
-        window.CSS.supports = function(property, value) {
-            if (property === 'font-display') {
-                return false;
-            }
-            return originalSupports.call(this, property, value);
+            // Always return true for Windows fonts, false for others
+            return winFonts.some(font => fontSpec.includes(font));
         };
     }
     
@@ -273,6 +293,39 @@ This ensures HTTP headers match the JavaScript spoofing for maximum effectivenes
             return result;
         };
     }
+    
+    // Override CSS.supports for font-display
+    if (window.CSS && window.CSS.supports) {
+        const originalSupports = window.CSS.supports;
+        window.CSS.supports = function(property, value) {
+            if (property === 'font-display') {
+                return false;
+            }
+            return originalSupports.call(this, property, value);
+        };
+    }
+    
+    // Override font loading API
+    if (document.fonts && document.fonts.ready) {
+        const originalReady = document.fonts.ready;
+        Object.defineProperty(document.fonts, 'ready', {
+            get: () => Promise.resolve(),
+            configurable: true
+        });
+    }
+    
+    // Override font enumeration via CSS
+    const originalQuerySelector = document.querySelector;
+    document.querySelector = function(selector) {
+        if (selector && selector.includes('font')) {
+            // Return a fake element for font queries
+            return {
+                style: { fontFamily: 'Arial, sans-serif' },
+                getBoundingClientRect: () => ({ width: 100, height: 20 })
+            };
+        }
+        return originalQuerySelector.call(this, selector);
+    };
 
     // --- 9. Permissions, mediaDevices, storage, etc. (realistic) ---
     if ('permissions' in navigator) {
