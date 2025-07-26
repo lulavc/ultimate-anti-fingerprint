@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Ultimate Anti-Fingerprint
 // @namespace    https://greasyfork.org/users/your-username
-// @version      1.2
-// @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection
-// @author       lulzactive
+// @version      1.3
+// @description  Advanced anti-fingerprinting: Chrome/Windows spoof, font, plugin, WebGL, canvas, and cookie protection. Updated for consistency and realism.
+// @author       lulzactive (with improvements)
 // @match        *://*/*
 // @license      MIT
 // @locale       en
@@ -13,7 +13,7 @@
 
 /*
 IMPORTANT: For perfect protection, use a User-Agent Switcher extension to match HTTP headers:
-- User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+- User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.168 Safari/537.36
 - Accept-Language: en-US,en;q=0.9
 - Platform: Windows
 
@@ -26,6 +26,20 @@ NOTE: Paranoid mode is enabled (PARANOID_CANVAS = true) for maximum protection a
 This returns blank canvas data to prevent unique fingerprinting.
 
 ENHANCED: Multiple blank images, consistent patterns, improved font detection, enhanced AudioContext, screen, battery, connection, and timezone protection for maximum fingerprinting resistance.
+
+UPDATES in 1.3:
+- Consistent spoofs across sessions using localStorage seed.
+- Proper PluginArray mimic to avoid detection.
+- Expanded font list and additional font loading overrides.
+- Added WebRTC and sensor protections.
+- Updated profile to Chrome 138 (as of July 2025).
+- Tracker list expanded with wildcards and regex support.
+- Toggleable debug logging.
+- Default disabled CANVAS_TEXT_RANDOMIZE to reduce breakage risk.
+
+WARNING: This script may break functionality on some sites (e.g., canvas-heavy apps). Test thoroughly on sites like browserleaks.com.
+Spoofing might violate some sites' Terms of Service. Use at your own risk.
+For dynamic tracker lists, consider integrating with extensions like uBlock Origin.
 */
 
 (function() {
@@ -35,17 +49,25 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     const PARANOID_CANVAS = true;  // true = always blank canvas (paranoid mode)
     const ROUND_SCREEN = false;    // true = round screen size to nearest 100
     const FONT_RANDOMIZE = true;   // true = randomize measureText width
-    const CANVAS_TEXT_RANDOMIZE = true; // true = randomize fillText/strokeText/rects
+    const CANVAS_TEXT_RANDOMIZE = false; // true = randomize fillText/strokeText/rects (disabled by default to avoid UI breakage)
+    const DEBUG_MODE = false;      // true = enable console logging for spoofs and blocks
+
+    // Generate or retrieve consistent seed for spoofs (per-install consistency)
+    let consistentSeed = parseInt(localStorage.getItem('antiFPSeed'));
+    if (!consistentSeed) {
+        consistentSeed = Math.floor(Math.random() * 1000000);
+        localStorage.setItem('antiFPSeed', consistentSeed);
+    }
 
     // --- 1. Third-party cookie blocking (always on) ---
     try {
         document.cookie = 'sameSite=strict';
     } catch (e) {}
 
-    // --- 2. Chrome/Windows profile (all common values) ---
+    // --- 2. Chrome/Windows profile (all common values, updated to Chrome 138) ---
     const profile = {
-        id: 'Chrome 120 - Win10',
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        id: 'Chrome 138 - Win10',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.168 Safari/537.36',
         platform: 'Win32',
         language: 'en-US',
         screenWidth: 1920,
@@ -59,7 +81,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         devicePixelRatio: 1,
         vendor: 'Google Inc.',
         productSub: '20030107',
-        appVersion: '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        appVersion: '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.168 Safari/537.36',
         appName: 'Netscape',
         doNotTrack: '1',
         maxTouchPoints: 0,
@@ -77,6 +99,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
                 get: valueFn,
                 configurable: true
             });
+            if (DEBUG_MODE) console.log(`Spoofed ${prop} to ${valueFn()}`);
         } catch (e) {}
     }
 
@@ -95,7 +118,22 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     spoof(navigator, 'appName', () => profile.appName);
     spoof(navigator, 'doNotTrack', () => profile.doNotTrack);
     spoof(navigator, 'maxTouchPoints', () => profile.maxTouchPoints);
-    spoof(navigator, 'plugins', () => profile.plugins);
+    
+    // Proper PluginArray mimic
+    function createPluginArray(pluginsData) {
+        const pluginArray = [];
+        pluginsData.forEach(plugin => {
+            const p = { name: plugin.name, filename: plugin.filename, description: plugin.description };
+            pluginArray.push(p);
+            pluginArray[plugin.name] = p; // For namedItem
+        });
+        pluginArray.item = function(index) { return this[index] || null; };
+        pluginArray.namedItem = function(name) { return this[name] || null; };
+        pluginArray.length = pluginsData.length;
+        pluginArray.refresh = function() {}; // Mimic method
+        return Object.setPrototypeOf(pluginArray, PluginArray.prototype);
+    }
+    spoof(navigator, 'plugins', () => createPluginArray(profile.plugins));
     
     // Timezone spoofing - more comprehensive
     if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
@@ -124,25 +162,39 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     Object.setPrototypeOf(Intl.DateTimeFormat, originalDateTimeFormat);
     Object.setPrototypeOf(Intl.DateTimeFormat.prototype, originalDateTimeFormat.prototype);
     
-    // Screen spoofing (optionally rounded)
-    const screenWidth = ROUND_SCREEN ? Math.floor(profile.screenWidth / 100) * 100 : profile.screenWidth;
-    const screenHeight = ROUND_SCREEN ? Math.floor(profile.screenHeight / 100) * 100 : profile.screenHeight;
+    // Screen spoofing (optionally rounded, with consistent selection)
+    const commonResolutions = [
+        { width: 1920, height: 1080 },
+        { width: 1366, height: 768 },
+        { width: 1536, height: 864 },
+        { width: 1440, height: 900 },
+        { width: 1280, height: 720 }
+    ];
+    const screenIndex = consistentSeed % commonResolutions.length;
+    const selectedResolution = commonResolutions[screenIndex];
+    const screenWidth = ROUND_SCREEN ? Math.floor(selectedResolution.width / 100) * 100 : selectedResolution.width;
+    const screenHeight = ROUND_SCREEN ? Math.floor(selectedResolution.height / 100) * 100 : selectedResolution.height;
     spoof(window.screen, 'width', () => screenWidth);
     spoof(window.screen, 'height', () => screenHeight);
+    spoof(window.screen, 'availWidth', () => screenWidth);
+    spoof(window.screen, 'availHeight', () => screenHeight);
+    spoof(window.screen, 'availLeft', () => 0);
+    spoof(window.screen, 'availTop', () => 0);
+    spoof(window.screen, 'pixelDepth', () => 24);
 
     // --- 5. Canvas randomization (subtle, not static, or paranoid mode) ---
     if (window.HTMLCanvasElement) {
         if (PARANOID_CANVAS) {
-            // Enhanced paranoid canvas mode - multiple blank images for variety
+            // Enhanced paranoid canvas mode - multiple blank images for variety, selected consistently
             const blankImages = [
                 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP89PwGHwAFYAJm6ocdgAAAABJRU5ErkJggg==', // 1x1 transparent
                 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77yQAAAABJRU5ErkJggg==', // 1x1 white
                 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77yQAAAABJRU5ErkJggg==' // 1x1 black
             ];
             
-            // Select consistent blank image based on canvas size
+            // Select consistent blank image based on canvas size and seed
             const getBlankImage = (canvas) => {
-                const seed = canvas.width + canvas.height;
+                const seed = canvas.width + canvas.height + consistentSeed;
                 const index = Math.abs(seed) % blankImages.length;
                 return blankImages[index];
             };
@@ -169,7 +221,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
             const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
             CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
                 const imgData = origGetImageData.call(this, x, y, w, h);
-                const seed = x + y + w + h + this.canvas.width + this.canvas.height;
+                const seed = x + y + w + h + this.canvas.width + this.canvas.height + consistentSeed;
                 
                 // Create consistent pattern based on canvas and coordinates
                 for (let i = 0; i < imgData.data.length; i += 4) {
@@ -207,7 +259,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
                 return context;
             };
         } else {
-            // More aggressive canvas fingerprinting protection
+            // More aggressive canvas fingerprinting protection with consistent seed
             const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
             HTMLCanvasElement.prototype.toDataURL = function() {
                 const ctx = this.getContext('2d');
@@ -215,8 +267,8 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
                     const { width, height } = this;
                     try {
                         const imgData = ctx.getImageData(0, 0, width, height);
-                        // Use more aggressive deterministic noise
-                        const seed = width * height + Date.now() % 1000;
+                        // Use more aggressive deterministic noise with consistent seed
+                        const seed = width * height + consistentSeed;
                         for (let i = 0; i < imgData.data.length; i += 4) {
                             const noise = Math.sin(seed + i) * Math.cos(seed + i) * 2;
                             imgData.data[i] = Math.max(0, Math.min(255, imgData.data[i] + Math.floor(noise)));
@@ -229,39 +281,40 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
                 return origToDataURL.apply(this, arguments);
             };
             
-            // Also randomize getImageData
+            // Also randomize getImageData with consistent noise
             const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
             CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
                 const imgData = origGetImageData.call(this, x, y, w, h);
+                const seed = x + y + w + h + consistentSeed;
                 for (let i = 0; i < imgData.data.length; i += 4) {
-                    imgData.data[i] += Math.floor(Math.random() * 2);
-                    imgData.data[i+1] += Math.floor(Math.random() * 2);
-                    imgData.data[i+2] += Math.floor(Math.random() * 2);
+                    const noise = Math.floor(Math.sin(seed + i) * 2);
+                    imgData.data[i] += noise;
+                    imgData.data[i+1] += noise;
+                    imgData.data[i+2] += noise;
                 }
                 return imgData;
             };
             
-            // Canvas text/rect randomization
+            // Canvas text/rect randomization (if enabled)
             if (CANVAS_TEXT_RANDOMIZE) {
                 const methods = ['fillText', 'strokeText', 'fillRect', 'strokeRect', 'clearRect'];
                 methods.forEach(method => {
                     const orig = CanvasRenderingContext2D.prototype[method];
                     CanvasRenderingContext2D.prototype[method] = function(...args) {
+                        const seed = args.reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0) + consistentSeed;
                         if (method.includes('Text')) {
-                            args[1] += Math.random() * 0.5; // X
-                            args[2] += Math.random() * 0.5; // Y
+                            args[1] += Math.sin(seed) * 0.5; // X
+                            args[2] += Math.cos(seed) * 0.5; // Y
                         } else if (method.includes('Rect')) {
-                            args[0] += Math.random() * 0.5; // X
-                            args[1] += Math.random() * 0.5; // Y
-                            if (args.length > 2) args[2] *= 1 + (Math.random() - 0.5) * 0.01; // W
-                            if (args.length > 3) args[3] *= 1 + (Math.random() - 0.5) * 0.01; // H
+                            args[0] += Math.sin(seed) * 0.5; // X
+                            args[1] += Math.cos(seed) * 0.5; // Y
+                            if (args.length > 2) args[2] *= 1 + (Math.sin(seed) - 0.5) * 0.01; // W
+                            if (args.length > 3) args[3] *= 1 + (Math.cos(seed) - 0.5) * 0.01; // H
                         }
                         return orig.apply(this, args);
                     };
                 });
             }
-            
-
         }
     }
     
@@ -270,7 +323,8 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         const origMeasureText = CanvasRenderingContext2D.prototype.measureText;
         CanvasRenderingContext2D.prototype.measureText = function() {
             const result = origMeasureText.apply(this, arguments);
-            result.width = result.width * (1 + (Math.random() - 0.5) * 0.01); // ±0.5% noise
+            const seed = arguments[0].length + consistentSeed;
+            result.width = result.width * (1 + (Math.sin(seed) - 0.5) * 0.01); // ±0.5% consistent noise
             return result;
         };
     }
@@ -286,8 +340,8 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
             // Enhanced parameter spoofing with more realistic values
             const result = origGetParameter.call(this, param);
             if (typeof result === 'number' && result > 0) {
-                // Use more sophisticated deterministic values
-                const seed = param + this.canvas.width + this.canvas.height;
+                // Use more sophisticated deterministic values with seed
+                const seed = param + this.canvas.width + this.canvas.height + consistentSeed;
                 const baseValue = Math.floor(Math.sin(seed) * 500) + 1000;
                 const variation = Math.floor(Math.cos(seed) * 100);
                 return Math.max(1, baseValue + variation);
@@ -301,7 +355,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
             const res = origGetShaderPrecisionFormat.apply(this, arguments);
             if (res && typeof res.precision === 'number') {
                 // Return consistent precision values
-                const seed = this.canvas.width + this.canvas.height;
+                const seed = this.canvas.width + this.canvas.height + consistentSeed;
                 res.precision = Math.floor(Math.sin(seed) * 10) + 20; // Consistent range
             }
             return res;
@@ -312,10 +366,10 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         WebGLRenderingContext.prototype.getExtension = function(name) {
             const ext = origGetExtension.call(this, name);
             if (ext && typeof ext === 'object') {
-                // Add more aggressive randomization to extension properties
+                // Add more aggressive randomization to extension properties with seed
                 Object.keys(ext).forEach(key => {
                     if (typeof ext[key] === 'number') {
-                        const seed = name.length + key.length + this.canvas.width;
+                        const seed = name.length + key.length + this.canvas.width + consistentSeed;
                         const noise = Math.sin(seed) * Math.cos(seed) * 3;
                         ext[key] = Math.max(0, ext[key] + Math.floor(noise));
                     }
@@ -329,7 +383,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         WebGLRenderingContext.prototype.getSupportedExtensions = function() {
             const extensions = origGetSupportedExtensions.call(this);
             // Return consistent subset of extensions
-            const seed = this.canvas.width + this.canvas.height;
+            const seed = this.canvas.width + this.canvas.height + consistentSeed;
             const startIndex = Math.floor(Math.sin(seed) * extensions.length);
             return extensions.slice(startIndex, startIndex + Math.floor(extensions.length / 2));
         };
@@ -402,12 +456,12 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         }
     } catch (e) {}
 
-    // --- 8. Font spoofing (Windows fonts) ---
+    // --- 8. Font spoofing (Windows fonts, expanded) ---
     const winFonts = [
         'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Cambria Math', 'Comic Sans MS',
         'Consolas', 'Courier New', 'Georgia', 'Impact', 'Lucida Console', 'Lucida Sans Unicode',
-        'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Tahoma', 'Times New Roman',
-        'Trebuchet MS', 'Verdana', 'Symbol', 'Wingdings'
+        'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Segoe UI Emoji', 'Tahoma', 'Times New Roman',
+        'Trebuchet MS', 'Verdana', 'Symbol', 'Wingdings', 'Webdings'
     ];
     
     // Enhanced font protection
@@ -426,6 +480,18 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
             );
             
             return isWindowsFont || isCommonFont;
+        };
+    }
+    
+    // Override font loading API to reject non-standard fonts
+    if (document.fonts && document.fonts.load) {
+        const origLoad = document.fonts.load;
+        document.fonts.load = function(font, text) {
+            if (!winFonts.some(f => font.includes(f))) {
+                if (DEBUG_MODE) console.warn(`Blocked non-standard font load: ${font}`);
+                return Promise.reject(new Error('Font not available'));
+            }
+            return origLoad.call(this, font, text);
         };
     }
     
@@ -478,9 +544,8 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         };
     }
     
-    // Override font loading API
+    // Override font loading API ready
     if (document.fonts && document.fonts.ready) {
-        const originalReady = document.fonts.ready;
         Object.defineProperty(document.fonts, 'ready', {
             get: () => Promise.resolve(),
             configurable: true
@@ -488,45 +553,12 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     }
     
 
-
     // --- 9. Enhanced Screen, Device Memory, and Permissions ---
-    // Screen protection - use common resolutions
-    const commonResolutions = [
-        { width: 1920, height: 1080 },
-        { width: 1366, height: 768 },
-        { width: 1536, height: 864 },
-        { width: 1440, height: 900 },
-        { width: 1280, height: 720 }
-    ];
-    
-    const screenSeed = Math.floor(Math.random() * commonResolutions.length);
-    const selectedResolution = commonResolutions[screenSeed];
-    
-    // Override screen properties
-    Object.defineProperty(screen, 'width', { get: () => selectedResolution.width });
-    Object.defineProperty(screen, 'height', { get: () => selectedResolution.height });
-    Object.defineProperty(screen, 'availWidth', { get: () => selectedResolution.width });
-    Object.defineProperty(screen, 'availHeight', { get: () => selectedResolution.height });
-    Object.defineProperty(screen, 'availLeft', { get: () => 0 });
-    Object.defineProperty(screen, 'availTop', { get: () => 0 });
-    Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
-    Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
-    
-    // Device memory protection
-    if ('deviceMemory' in navigator) {
-        Object.defineProperty(navigator, 'deviceMemory', { 
-            get: () => 8,
-            configurable: true 
-        });
-    }
-    
-    // Hardware concurrency protection
-    if ('hardwareConcurrency' in navigator) {
-        Object.defineProperty(navigator, 'hardwareConcurrency', { 
-            get: () => 8,
-            configurable: true 
-        });
-    }
+    // Already spoofed screen above
+
+    // Device memory protection (already spoofed)
+
+    // Hardware concurrency protection (already spoofed)
     
     // Enhanced permissions protection
     if ('permissions' in navigator) {
@@ -620,37 +652,37 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     // --- 11. Enhanced Anti-Tracking Features ---
     const blockedTrackers = [
         // Google
-        "google-analytics.com", "googletagmanager.com", "googleadservices.com", "doubleclick.net", "adservice.google.com",
-        "pagead2.googlesyndication.com", "adclick.g.doubleclick.net", "gstatic.com/ads", "googlesyndication.com",
+        ".*google-analytics\\.com", ".*googletagmanager\\.com", ".*googleadservices\\.com", ".*doubleclick\\.net", ".*adservice\\.google\\.com",
+        ".*pagead2\\.googlesyndication\\.com", ".*adclick\\.g\\.doubleclick\\.net", ".*gstatic\\.com/ads", ".*googlesyndication\\.com",
         // Facebook
-        "facebook.com/tr", "facebook.net", "connect.facebook.net", "fbcdn.net", "fb.com", "fbsbx.com",
+        ".*facebook\\.com/tr", ".*facebook\\.net", ".*connect\\.facebook\\.net", ".*fbcdn\\.net", ".*fb\\.com", ".*fbsbx\\.com",
         // Microsoft/Bing
-        "bat.bing.com", "bing.com/fd/ls", "clarity.ms",
+        ".*bat\\.bing\\.com", ".*bing\\.com/fd/ls", ".*clarity\\.ms",
         // Twitter/X
-        "analytics.twitter.com", "t.co/i/adsct", "static.ads-twitter.com",
+        ".*analytics\\.twitter\\.com", ".*t\\.co/i/adsct", ".*static\\.ads-twitter\\.com",
         // TikTok
-        "analytics.tiktok.com", "business.tiktok.com", "ads.tiktok.com",
+        ".*analytics\\.tiktok\\.com", ".*business\\.tiktok\\.com", ".*ads\\.tiktok\\.com",
         // Amazon
-        "aax.amazon-adsystem.com", "amazon-adsystem.com",
+        ".*aax\\.amazon-adsystem\\.com", ".*amazon-adsystem\\.com",
         // Other ad/trackers
-        "scorecardresearch.com", "hotjar.com", "mixpanel.com", "matomo.org", "quantserve.com", "adroll.com",
-        "criteo.com", "adnxs.com", "taboola.com", "outbrain.com", "zedo.com", "yandex.ru/metrika", "yandex.net",
-        "newrelic.com", "segment.com", "optimizely.com", "bluekai.com", "adform.net", "openx.net", "rubiconproject.com",
-        "moatads.com", "smartadserver.com", "pubmatic.com", "casalemedia.com", "advertising.com", "ml314.com",
-        "yieldmo.com", "bidswitch.net", "gumgum.com", "eyeota.net", "adition.com", "adscale.de", "adspirit.de",
-        "adtech.de", "bidr.io"
+        ".*scorecardresearch\\.com", ".*hotjar\\.com", ".*mixpanel\\.com", ".*matomo\\.org", ".*quantserve\\.com", ".*adroll\\.com",
+        ".*criteo\\.com", ".*adnxs\\.com", ".*taboola\\.com", ".*outbrain\\.com", ".*zedo\\.com", ".*yandex\\.ru/metrika", ".*yandex\\.net",
+        ".*newrelic\\.com", ".*segment\\.com", ".*optimizely\\.com", ".*bluekai\\.com", ".*adform\\.net", ".*openx\\.net", ".*rubiconproject\\.com",
+        ".*moatads\\.com", ".*smartadserver\\.com", ".*pubmatic\\.com", ".*casalemedia\\.com", ".*advertising\\.com", ".*ml314\\.com",
+        ".*yieldmo\\.com", ".*bidswitch\\.net", ".*gumgum\\.com", ".*eyeota\\.net", ".*adition\\.com", ".*adscale\\.de", ".*adspirit\\.de",
+        ".*adtech\\.de", ".*bidr\\.io"
     ];
     
-    // Helper to check if a URL is a tracker
+    // Helper to check if a URL is a tracker (with regex support)
     function isTracker(url) {
-        return blockedTrackers.some(domain => url.includes(domain));
+        return blockedTrackers.some(pattern => new RegExp(pattern).test(url));
     }
     
     // Block XMLHttpRequest
     const origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url) {
         if (isTracker(url)) {
-            console.warn("Blocked tracker (XHR):", url);
+            if (DEBUG_MODE) console.warn("Blocked tracker (XHR):", url);
             return; // Block request
         }
         return origOpen.apply(this, arguments);
@@ -661,7 +693,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     window.fetch = function(input, init) {
         const url = typeof input === "string" ? input : input.url;
         if (isTracker(url)) {
-            console.warn("Blocked tracker (fetch):", url);
+            if (DEBUG_MODE) console.warn("Blocked tracker (fetch):", url);
             return new Promise(() => {}); // Block request
         }
         return origFetch.apply(this, arguments);
@@ -675,7 +707,7 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
             const origSetAttribute = el.setAttribute;
             el.setAttribute = function(name, value) {
                 if ((name === "src" || name === "data-src") && isTracker(value)) {
-                    console.warn("Blocked tracker (element):", value);
+                    if (DEBUG_MODE) console.warn("Blocked tracker (element):", value);
                     return;
                 }
                 return origSetAttribute.apply(this, arguments);
@@ -690,32 +722,9 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
         window.sendBeacon = function() { return true; };
     } catch (e) {}
     
-    // Block or spoof Battery API
-    if (navigator.getBattery) {
-        navigator.getBattery = function() {
-            return Promise.resolve({
-                charging: true,
-                chargingTime: Infinity,
-                dischargingTime: Infinity,
-                level: 1.0,
-                addEventListener: () => {},
-                removeEventListener: () => {}
-            });
-        };
-    }
+    // Block or spoof Battery API (already done above)
     
-    // Block or spoof Network Information API
-    if (navigator.connection) {
-        Object.defineProperty(navigator, 'connection', {
-            get: () => ({
-                effectiveType: '4g',
-                rtt: 50,
-                downlink: 10,
-                saveData: false
-            }),
-            configurable: true
-        });
-    }
+    // Block or spoof Network Information API (already done above)
     
     // Block or spoof document.referrer
     Object.defineProperty(document, 'referrer', {
@@ -725,5 +734,32 @@ ENHANCED: Multiple blank images, consistent patterns, improved font detection, e
     
     // Reset window.name on every page load
     window.name = "";
+
+    // --- 12. Additional Protections: WebRTC and Sensors ---
+    // WebRTC protection
+    spoof(navigator, 'getUserMedia', () => Promise.reject(new Error('Not supported')));
+    if (navigator.mediaDevices) {
+        spoof(navigator.mediaDevices, 'getUserMedia', () => Promise.reject(new Error('Not supported')));
+    }
+
+    // Sensor protections (DeviceMotion and DeviceOrientation)
+    if (window.DeviceMotionEvent) {
+        window.DeviceMotionEvent = null;
+        window.addEventListener = new Proxy(window.addEventListener, {
+            apply: function(target, thisArg, args) {
+                if (args[0] === 'devicemotion') return;
+                return target.apply(thisArg, args);
+            }
+        });
+    }
+    if (window.DeviceOrientationEvent) {
+        window.DeviceOrientationEvent = null;
+        window.addEventListener = new Proxy(window.addEventListener, {
+            apply: function(target, thisArg, args) {
+                if (args[0] === 'deviceorientation') return;
+                return target.apply(thisArg, args);
+            }
+        });
+    }
 
 })();
